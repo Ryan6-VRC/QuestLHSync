@@ -2473,8 +2473,11 @@ static bool RefitSlow(X4 &x, const std::vector<V3> &S, const std::vector<V3> &Z,
     ks.push_back(k);
     per[k]++;
   }
-  for (int c : per)
-    if (c < 10) return false;
+  // two base stations seen enough pin the 4-DOF alignment; one out of the cameras' view all session (a Quest Pro's
+  // replay: 0 of one station's sightings) must not keep the timing from ever being estimated
+  int seen = 0;
+  for (int c : per) seen += c >= 10;
+  if (seen < 2) return false;
   const double r0 = 0.3 / kDeg, c2 = r0 * r0;
   const double sig[4] = {0.5 / kDeg, 0.05, 0.05, 0.05};  // the pull toward the start: one sighting's worth at this far
   auto res = [&](const X4 &y, std::vector<V3> &E) {
@@ -2558,7 +2561,8 @@ bool Timing::Search(const PoseHist &poses, const X4 &x, const std::vector<V3> &S
   edge = false;
   n = 0;
   if (rec_.empty() || S.size() < 2) return false;
-  double lo = wide ? -0.04 : cur - 0.015, hi = wide ? 0.10 : cur + 0.015, step = wide ? 0.0025 : 0.001;
+  // the wide search reaches the step's own limit (0.12): ALVR's timing follows its latency past 0.10 when frames queue
+  double lo = wide ? -0.04 : cur - 0.015, hi = wide ? 0.12 : cur + 0.015, step = wide ? 0.0025 : 0.001;
   std::vector<const Rec *> fast;
   std::vector<V3> so, sd;
   std::vector<float> sa;
@@ -2858,12 +2862,7 @@ void Sync::SetStreamer(const std::string &system) {
   std::lock_guard<std::mutex> g(st_m_);
   if (system == streamer_) return;
   streamer_ = system;
-  auto it = timings_.find(system);
-  if (it != timings_.end() && cfg_.learn_timing) {
-    expo_ = it->second;
-    timing_learned_ = true;
-    log_(Fmt("timing for %s: %.1f ms (learned before)", system.c_str(), it->second * 1000));
-  }
+  ApplyTiming();  // its learned timing, else its default: ALVR's lies far from the others'
 }
 
 std::string HeadsetId(const std::string &serial) {
@@ -2931,7 +2930,7 @@ void Sync::ApplyTiming() {
     timing_learned_ = true;
     log_(Fmt("timing for %s: %.1f ms (learned before)", streamer_.c_str(), it->second * 1000));
   } else {
-    expo_ = cfg_.arrival_clock ? kExpoArrival : kExpoDefault;
+    expo_ = cfg_.arrival_clock ? kExpoArrival : ExpoDefault(streamer_);
     timing_learned_ = false;
   }
 }
@@ -3667,8 +3666,15 @@ Transform Sync::Tick(double now) {
           sys = streamer_;
         }
         if (!sys.empty()) {
-          std::lock_guard<std::mutex> g(st_m_);
-          timings_[sys] = e;
+          {
+            std::lock_guard<std::mutex> g(st_m_);
+            timings_[sys] = e;
+          }
+          // kept now, with the stations state.json already holds (this session's last save, else the loaded ones,
+          // unmoved): the next save waits for a fit under 0.3 deg, and a session that ends first (ALVR learned
+          // 74.6 ms the second its headset left) loses it
+          if (has_saved_) SaveState(saved_x_, saved_cs_);
+          else SaveState(X4{}, quest_);
         }
         if (first || std::fabs(best - cur) > 0.002)
           log_(Fmt("timing%s%s: %.1f ms (best fit %.1f ms within %.1f, on %d fast-head sightings: %.1f turning left, "

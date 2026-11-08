@@ -5,6 +5,8 @@
 // live driver (QuestLHSync recordings have them).
 // --learn: round-trip-less logs still learn the timing (starting from --expo), to test the estimator.
 // --learn-grid: learn the cameras' frame period as for headsets other than the Quest Pro, to test that.
+// --streamer NAME: SteamVR's streamer driver to replay as (default "replay"), for its default timing (alvr_server; with --pings,
+//   since logs without round trips start from EXPO 0.020 whatever the streamer).
 // --channel SERIAL=N: a base station's channel, for older logs.
 // --xf file: the transform applied to the lighthouse devices (raw -> Quest: pc_ns qw qx qy qz tx ty tz), every 0.25 s
 #include <chrono>
@@ -18,7 +20,7 @@
 #include "../driver/sync.h"
 
 int main(int argc, char **argv) {
-  std::string log, calib, dir, outp, xfp;
+  std::string log, calib, dir, outp, xfp, streamer = "replay";
   bool learn = false, learn_grid = false, pings = false;
   double expo = -1;
   std::map<std::string, int> chans;
@@ -34,6 +36,7 @@ int main(int argc, char **argv) {
     else if (a == "--xf" && i + 1 < argc) xfp = argv[++i];
     else if (a == "--rays" && i + 1 < argc) g_ray_dump = fopen(argv[++i], "w");  // every sighting + the stations
     else if (a == "--expo" && i + 1 < argc) expo = atof(argv[++i]);
+    else if (a == "--streamer" && i + 1 < argc) streamer = argv[++i];
     else if (a == "--learn") learn = true;
     else if (a == "--learn-grid") learn_grid = true;
     else if (a == "--pings") pings = true;
@@ -51,8 +54,8 @@ int main(int argc, char **argv) {
   cfg.learn_timing = learn;
   cfg.learn_grid = learn_grid;
   Sync sync(cfg, logfn);
+  sync.SetStreamer(streamer);  // first: it sets the streamer's own timing, which --expo then overrides
   if (expo >= 0) sync.ForceExpo(expo);
-  sync.SetStreamer("replay");
   sync.SetChannels(chans);
   std::string err;
   if (!sync.SetCalibration(ss.str(), &err)) { fprintf(stderr, "calibration: %s\n", err.c_str()); return 1; }

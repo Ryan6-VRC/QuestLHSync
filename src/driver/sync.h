@@ -37,6 +37,12 @@ constexpr double kLagFallback = 0.005;  // s, typical poll lag while the frame g
 constexpr double kExpoArrival = 0.020;  // s, grid -> exposure with the arrival-envelope clock (logs without round trips)
 constexpr double kExpoDefault = 0.018;  // s, grid -> pose time with the round-trip clock, before it's learned
                                         // (CreoleCast learns 18.5, a replayed streamer 20.8)
+// ALVR's server moves the head pose ahead by its own motion-to-photon latency and hands it to SteamVR as the pose of
+// now (poseTimeOffset 0), so its timing is that latency more: a Quest Pro session on ALVR replayed best at 80-85 ms
+// and learned 85 from either start, where 18 left 7 times fewer turning sightings within 0.5 deg. It follows ALVR's latency, so it is
+// only where learning starts
+constexpr double kExpoAlvr = 0.080;
+inline double ExpoDefault(const std::string &streamer) { return streamer == "alvr_server" ? kExpoAlvr : kExpoDefault; }
 constexpr double kWmax = 60.0;          // deg/s: sightings while the head turns faster are skipped
 constexpr double kNearDeg = 5.0;        // deg: a fast-head sighting this close to a base station counts for timing
 constexpr int kTimingFirstN = 200;      // such sightings before the first (wide) timing estimate
